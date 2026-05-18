@@ -28,10 +28,6 @@ TASK_PROMPT = """
 
 IMPORTANT_INSTRUCTIONS = """
 # MOST IMPORTANT INSTRUCTIONS
-- **At step {step_threshold}: you MUST call finish(success=False, is_continue=True, \
-summary="precise chronologically-ordered list of things the agent did \
-with the reason for doing that along with relevant code snippets")** or \
-if the task is not complete and you are at risk of running out of steps or context length.
 - Work dir: {work_dir}
 - Current process PID: {current_pid} — NEVER kill this process.
 """
@@ -127,7 +123,23 @@ def _str_to_bool(value: str | bool) -> bool:
     return bool(value)
 
 
-def finish(success: bool, is_continue: bool = False, summary: str = "") -> str:
+def finish(result: str) -> str:
+    """The agent must call this function with the final answer to the task, which
+    should include a summary of the work done.
+
+    Args:
+        result: The final answer / output produced by the agent.
+
+    Returns:
+        YAML string with ``success``, ``is_continue``, and ``summary`` keys.
+    """
+    return yaml.dump(
+        {"success": True, "is_continue": False, "summary": result},
+        sort_keys=False,
+    )
+
+
+def finish_old(success: bool, is_continue: bool = False, summary: str = "") -> str:
     """Finish execution with status and summary.
 
     Args:
@@ -219,7 +231,6 @@ class RelentlessAgent(Base):
         summaries: list[str] = []
         current_pid = str(os.getpid())
         important_instructions = IMPORTANT_INSTRUCTIONS.format(
-            step_threshold=str(self.max_steps - 2),
             work_dir=_user_visible_work_dir(self.work_dir),
             current_pid=current_pid,
         )
