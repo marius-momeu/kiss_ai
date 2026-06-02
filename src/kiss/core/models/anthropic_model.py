@@ -44,6 +44,32 @@ def _uses_adaptive_thinking(model_name: str) -> bool:
     return minor >= 6
 
 
+def _defaults_to_omitted_thinking(model_name: str) -> bool:
+    """Return True for models where the Messages API defaults ``thinking.display``
+    to ``"omitted"`` instead of ``"summarized"``.
+
+    Per Anthropic's extended-thinking docs, this is the default behaviour on
+    Claude Opus 4.7, Claude Opus 4.8, and the Claude Mythos Preview family.
+    On those models the response carries thinking blocks with an empty
+    ``thinking`` field plus only a base64 ``signature`` — the client never
+    sees the model's reasoning content. Callers that want a summarized
+    reasoning trace surfaced to their printer must opt back in with
+    ``display: "summarized"``. We do this implicitly here so the
+    ``thinking_callback`` / ``token_callback`` path stays useful on newer
+    Opus models.
+    """
+    prefix = "claude-opus-4-"
+    if not model_name.startswith(prefix):
+        return False
+    suffix = model_name[len(prefix):]
+    minor_str = suffix.split("-", 1)[0]
+    try:
+        minor = int(minor_str)
+    except ValueError:
+        return False
+    return minor >= 7
+
+
 class AnthropicModel(Model):
     """A model that uses Anthropic's Messages API (Claude)."""
 
@@ -287,6 +313,16 @@ class AnthropicModel(Model):
                 kwargs["thinking"] = {"type": "adaptive"}
             else:
                 kwargs["thinking"] = {"type": "enabled", "budget_tokens": 10000}
+            # On models whose Messages API defaults ``thinking.display`` to
+            # ``"omitted"`` (Opus 4.7, Opus 4.8, Mythos Preview), explicitly
+            # request the summarized display so the streamed response carries
+            # ``thinking_delta`` events the printer can render. Without this
+            # opt-in those models only emit a ``signature_delta`` per thinking
+            # block and the client never sees the reasoning content (it's
+            # still BILLED for, just not displayed). See Anthropic's
+            # extended-thinking docs §"Controlling thinking display".
+            if _defaults_to_omitted_thinking(self.model_name):
+                kwargs["thinking"]["display"] = "summarized"
 
         # When extended thinking is enabled, request interleaved thinking via
         # the anthropic-beta header so the model emits between-tool-call
